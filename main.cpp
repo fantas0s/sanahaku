@@ -21,6 +21,10 @@ int main(int argc, char *argv[])
             QCoreApplication::translate("main", "Etsi annettuja kirjaimia. Jos sama kirjain on annettu useampaan kertaan, sen pitää esiintyä annetun määrän verran."),
             QCoreApplication::translate("main", "kirjainjono"));
     parser.addOption(matchCharsOption);
+    QCommandLineOption limitOption(QStringList() << "l" << "limit",
+            QCoreApplication::translate("main", "Kuinka monta kirjainta saa jäädä käyttämättä."),
+            QCoreApplication::translate("main", "numero"));
+    parser.addOption(limitOption);
 
     // Process the actual command line arguments given by the user
     parser.process(app);
@@ -32,6 +36,16 @@ int main(int argc, char *argv[])
         charsToMatch.remove(0,1);
     }
     if (!charMatchList.length()) {
+        parser.showHelp();
+        return 1;
+    }
+
+    QString limitString = parser.value(limitOption);
+    quint32 allowedUnusedChars = 0;
+    if (limitString.length()) {
+        allowedUnusedChars = limitString.toInt();
+    }
+    if (charMatchList.length() <= allowedUnusedChars) {
         parser.showHelp();
         return 1;
     }
@@ -54,25 +68,38 @@ int main(int argc, char *argv[])
                     while(xmlReader.readNextStartElement()) {
                         if(xmlReader.name() == "s") {
                             const QString readWord = xmlReader.readElementText();
+                            // The readWord must be built from the characters in charMatchList plus 1 or 0 extra characters.
                             bool wordOK = true;
-                            int unmatchedChars = 0;
-                            foreach (QChar character, charMatchList) {
-                                if (!readWord.contains(character, Qt::CaseInsensitive)) {
-                                    wordOK = false;
-                                    break;
-                                } else if (readWord.count(character) != charMatchList.count(character)) {
-                                    if (!unmatchedChars) {
-                                        unmatchedChars++;
+                            int extraCharacters = 0;
+                            for (int index = 0 ; index < readWord.length() ; ++index) {
+                                if (!charMatchList.contains(readWord[index]))
+                                {
+                                    if (!extraCharacters) {
+                                        extraCharacters++;
                                     } else {
+                                        wordOK = false;
+                                        break;
+                                    }
+                                } else if (readWord.count(readWord[index]) > charMatchList.count(readWord[index])) {
+                                    if (extraCharacters <= 1) {
+                                        extraCharacters += (readWord.count(readWord[index]) - charMatchList.count(readWord[index]));
+                                    }
+                                    if (extraCharacters > 1) {
                                         wordOK = false;
                                         break;
                                     }
                                 }
                             }
                             if (wordOK &&
-                                ((readWord.length() == charMatchList.length()) ||
-                                 ((readWord.length()-1) == charMatchList.length())))
+                                ((charMatchList.length() + extraCharacters) > (readWord.length()+allowedUnusedChars))) {
+                                /* All of the words in the word found from dictionary are in the list of given characters
+                                 * (or only one was not found) but we have too many unused characters.
+                                 */
+                                wordOK = false;
+                            }
+                            if (wordOK) {
                                 qDebug() << readWord;
+                            }
                         } else {
                             xmlReader.skipCurrentElement();
                         }
