@@ -21,10 +21,14 @@ int main(int argc, char *argv[])
             QCoreApplication::translate("main", "Etsi annettuja kirjaimia. Jos sama kirjain on annettu useampaan kertaan, sen pitää esiintyä annetun määrän verran."),
             QCoreApplication::translate("main", "kirjainjono"));
     parser.addOption(matchCharsOption);
-    QCommandLineOption limitOption(QStringList() << "l" << "limit",
+    QCommandLineOption unusedOption(QStringList() << "u" << "unused",
             QCoreApplication::translate("main", "Kuinka monta kirjainta saa jäädä käyttämättä."),
             QCoreApplication::translate("main", "numero"));
-    parser.addOption(limitOption);
+    parser.addOption(unusedOption);
+    QCommandLineOption extraOption(QStringList() << "e" << "extra",
+            QCoreApplication::translate("main", "Kuinka monta ylimääräistä kirjainta sallitaan."),
+            QCoreApplication::translate("main", "numero"));
+    parser.addOption(extraOption);
 
     // Process the actual command line arguments given by the user
     parser.process(app);
@@ -40,7 +44,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    QString limitString = parser.value(limitOption);
+    QString limitString = parser.value(unusedOption);
     quint32 allowedUnusedChars = 0;
     if (limitString.length()) {
         allowedUnusedChars = limitString.toInt();
@@ -50,11 +54,20 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    QString extraString = parser.value(extraOption);
+    quint32 allowedExtraChars = 1;
+    if (extraString.length()) {
+        allowedExtraChars = extraString.toInt();
+    }
+
     QFile input(xmlFilename);
     if (!input.open(QIODevice::ReadOnly|QIODevice::Text)) {
         qCritical() << "No file" << xmlFilename << "found.";
         return 1;
     }
+    QTextStream myStdout( stdout );
+    myStdout << "Allowing " << allowedUnusedChars << " unused characters.\n";
+    myStdout << "Allowing " << allowedExtraChars << " extra characters.\n";
     QXmlStreamReader xmlReader(&input);
     /*
      * <kotus-sanalista>
@@ -74,31 +87,34 @@ int main(int argc, char *argv[])
                             for (int index = 0 ; index < readWord.length() ; ++index) {
                                 if (!charMatchList.contains(readWord[index]))
                                 {
-                                    if (!extraCharacters) {
+                                    // The dictionary word has a character not in the given list
+                                    if (extraCharacters < allowedExtraChars) {
                                         extraCharacters++;
                                     } else {
                                         wordOK = false;
                                         break;
                                     }
                                 } else if (readWord.count(readWord[index]) > charMatchList.count(readWord[index])) {
-                                    if (extraCharacters <= 1) {
+                                    // The dictionary word has too many instances of the character in the given list
+                                    if (extraCharacters <= allowedExtraChars) {
                                         extraCharacters += (readWord.count(readWord[index]) - charMatchList.count(readWord[index]));
                                     }
-                                    if (extraCharacters > 1) {
+                                    if (extraCharacters > allowedExtraChars) {
                                         wordOK = false;
                                         break;
                                     }
                                 }
+                                // Otherwise OK.
                             }
                             if (wordOK &&
                                 ((charMatchList.length() + extraCharacters) > (readWord.length()+allowedUnusedChars))) {
-                                /* All of the words in the word found from dictionary are in the list of given characters
-                                 * (or only one was not found) but we have too many unused characters.
+                                /* All of the characters in the dictionary word were in the list of given characters
+                                 * (or "not found" characters is in allowed limits) but we have too many unused characters.
                                  */
                                 wordOK = false;
                             }
                             if (wordOK) {
-                                qDebug() << readWord;
+                                myStdout << readWord << "\n";
                             }
                         } else {
                             xmlReader.skipCurrentElement();
@@ -112,5 +128,6 @@ int main(int argc, char *argv[])
             xmlReader.raiseError(QString("Incorrect file"));
         }
     }
+    myStdout.flush();
     return 0;
 }
